@@ -8,7 +8,8 @@
     const sent = new Set();
     const stage = {queued: "等待解析", resolving: "解析 CDN", remote_parsing: "听悟解析文件",
         submitting: "提交听悟", transcribing: "转写中", exporting: "导出 DOCX",
-        converting: "下载并转 TXT", paused: "已暂停", done: "已完成", error: "失败"};
+        converting: "下载并转 TXT", awaiting_confirmation: "等待听悟确认", waiting_connection: "等待重连",
+        paused: "已暂停", done: "已完成", error: "失败"};
     async function api(path, payload) {
         const response = await fetch(path, {method: payload ? "POST" : "GET",
             headers: payload ? {"Content-Type": "application/json"} : {},
@@ -38,14 +39,15 @@
             box.open = open.has(job.id) || (firstRender && index === 0);
             const done = job.rows.filter(row => row.status === "done").length;
             const errors = job.rows.filter(row => row.status === "error").length;
-            box.append(element("summary", `${job.local_import ? "DOCX 转 TXT" : "听悟批量转写"} · ${new Date(job.created * 1000).toLocaleString()} · ${done}/${job.rows.length} 完成${errors ? ` · ${errors} 失败` : ""}`));
+            const waiting = job.rows.filter(row => row.status === "awaiting_confirmation").length;
+            box.append(element("summary", `${job.local_import ? "DOCX 转 TXT" : "听悟批量转写"} · ${new Date(job.created * 1000).toLocaleString()} · ${done}/${job.rows.length} 完成${errors ? ` · ${errors} 失败` : ""}${waiting ? ` · ${waiting} 等待确认` : ""}${job.status === "waiting_connection" ? " · 等待听悟重连，连接后自动继续" : ""}`));
             const actions = element("div", undefined, "tw-actions");
             if (done) for (const [kind, label] of [["txt", "打包下载 TXT"], ["docx", "打包下载 DOCX"]])
                 actions.append(downloadLink(label, `/api/tingwu/bundle?job=${job.id}&kind=${kind}`));
             if (!job.local_import && job.status !== "done") {
-                const running = ["running", "pausing"].includes(job.status);
+                const running = ["running", "pausing", "waiting_connection"].includes(job.status);
                 const button = element("button", running ? "暂停本地跟踪" : "继续跟踪 / 重试导出", "secondary");
-                button.disabled = job.status === "pausing" || (!running && !connected);
+                button.disabled = job.status === "pausing";
                 button.onclick = async () => {
                     button.disabled = true;
                     try { await api("/api/tingwu/control", {job_id: job.id, action: running ? "pause" : "resume"}); }

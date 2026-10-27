@@ -223,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlsplit(self.path)
             query = urllib.parse.parse_qs(parsed.query)
             if parsed.path == "/api/health":
-                return self.send_json({"ok": True, "service": "local-bilibili-subtitle", "tingwu": True})
+                return self.send_json({"ok": True, "service": "local-bilibili-subtitle", "tingwu": True,
+                                       "tingwu_recovery": 2})
             if parsed.path == "/api/cookie-extension/info":
                 return self.send_json(extension_info())
             if parsed.path == "/api/cookie-extension/download":

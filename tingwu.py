@@ -1,6 +1,6 @@
 """@brief 听悟网页会话桥接、批量转写调度及 DOCX/TXT 文件归档。"""
 import base64
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 import copy
 import hmac
@@ -33,6 +33,14 @@ def filename(value):
 
 class BridgeUnavailable(Exception):
     pass
+
+
+class RemotePending(Exception):
+    """远端尚未生成可关联的任务，释放工作线程后定时查询。"""
+
+
+class TaskConflict(Exception):
+    """关联结果存在歧义，必须保留现场供人工核对。"""
 
 
 class BrowserBridge:
@@ -158,7 +166,7 @@ class TingwuService:
     """本地任务持久化；远端提交前记录 fileId，恢复时只查询，避免重复转写。"""
 
     def __init__(self, root=None, bridge=None, video=None, downloader=None, interval=12,
-                 export_gap=5, retry_delay=5):
+                 export_gap=5, retry_delay=5, submit_gap=2):
         self.root = Path(root or ROOT / "downloads" / "tingwu")
         self.bridge = bridge or BrowserBridge(self.root / ".bridge-key")
         self.video = video or VideoClient()
@@ -167,6 +175,8 @@ class TingwuService:
         self.export_gap, self.retry_delay = export_gap, retry_delay
         self.export_lock = threading.Lock()
         self.last_export = 0
+        self.submit_lock = threading.Lock()
+        self.last_submit, self.submit_gap = 0, submit_gap
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tingwu")
         self.jobs, self.running, self.stops = {}, set(), {}
@@ -175,7 +185,7 @@ class TingwuService:
             try:
                 self.jobs = json.loads(state.read_text("utf-8"))
                 for job in self.jobs.values():
-                    if job["status"] == "running":
+                    if job["status"] in {"running", "waiting_connection", "pausing"}:
                         job["status"] = "paused"
                     for row in job["rows"]:
                         if row["status"] not in TERMINAL:
@@ -255,7 +265,11 @@ class TingwuService:
                 raise SubtitleError("批次正在运行，请等待当前操作结束。", "busy", 409)
             self.running.add(job["id"])
             self.stops[job["id"]] = threading.Event()
-            job["status"] = "running"
+            job.update(status="running", error=None)
+            for row in job["rows"]:
+                if row["status"] != "done":
+                    row.update(status="queued", next_retry_at=0, detail="等待恢复原任务" if row.get("submit_sent") else "等待解析")
+            self._save()
         threading.Thread(target=self._run, args=(job, cookie), daemon=True).start()
 
     def control(self, payload):
@@ -269,8 +283,6 @@ class TingwuService:
                     self.stops[key].set()
                 self._update(job, status="pausing" if key in self.running else "paused")
             elif payload.get("action") == "resume":
-                if not self.bridge.online:
-                    raise SubtitleError("请先恢复听悟网页连接。", "bridge_offline", 409)
                 self._launch(job)
             else:
                 raise SubtitleError("不支持的任务操作。")
@@ -304,10 +316,38 @@ class TingwuService:
                 if len(expanded) > 200:
                     raise SubtitleError("展开后超过 200 个分 P，请拆分为多个批次。")
                 self._update(job, rows=list({row["source"]: row for row in expanded}.values()), expanded=True)
-            futures = [self.pool.submit(self._process, job, row, cookie) for row in job["rows"]
-                       if row["status"] != "done"]
-            for future in futures:
-                future.result()
+            # 只向线程池投递当前可运行的三项；断线保留队列，不把整批排队项耗成暂停。
+            active = {}
+            while True:
+                for future in list(active):
+                    if future.done():
+                        future.result()
+                        del active[future]
+                stopped = self.stops[job["id"]].is_set()
+                pending = [row for row in job["rows"] if row["status"] not in TERMINAL | {"paused"}]
+                if not active and (stopped or not pending):
+                    break
+                if not stopped and self.bridge.online:
+                    if job["status"] == "waiting_connection":
+                        self._update(job, status="running")
+                    busy = set(active.values())
+                    for row in pending:
+                        if len(active) >= 3:
+                            break
+                        if row["id"] not in busy and row.get("next_retry_at", 0) <= time.time():
+                            active[self.pool.submit(self._process, job, row, cookie)] = row["id"]
+                elif not stopped and job["status"] != "waiting_connection":
+                    self._update(job, status="waiting_connection")
+                if active:
+                    wait(active, timeout=.25, return_when=FIRST_COMPLETED)
+                else:
+                    delay = (min((row.get("next_retry_at", 0) - time.time() for row in pending), default=.5)
+                             if self.bridge.online else .5)
+                    self.stops[job["id"]].wait(max(.01, min(.5, delay)))
+            if stopped:
+                for row in job["rows"]:
+                    if row["status"] not in TERMINAL:
+                        self._update(job, row, status="paused", detail="已暂停本地跟踪，远端已提交任务继续处理。")
             status = "paused" if any(row["status"] == "paused" for row in job["rows"]) else (
                 "partial" if any(row["status"] == "error" for row in job["rows"]) else "done")
             self._update(job, status=status)
@@ -335,6 +375,33 @@ class TingwuService:
         metadata = self.video.transcription_source(row["source"], cookie)
         self._update(job, row, title=metadata["title"])
         return metadata["cdn_url"]
+
+    @contextmanager
+    def _submission_slot(self, job):
+        """网页提交串行化，避免同时请求导致远端接收与列表更新相互干扰。"""
+        while not self.submit_lock.acquire(timeout=.5):
+            self._wait(job, 0)
+        try:
+            self._wait(job, max(0, self.last_submit + self.submit_gap - time.monotonic()))
+            yield
+        finally:
+            self.last_submit = time.monotonic()
+            self.submit_lock.release()
+
+    @staticmethod
+    def _remote_candidates(row, records):
+        """优先匹配稳定 ID；文件名和字节数只能关联提交前快照之外的新记录。"""
+        records = [item for item in records if isinstance(item, dict)]
+        exact = [item for item in records if row.get("file_id") and
+                 row["file_id"] in {item.get("taskId"), item.get("fileId")}]
+        if exact:
+            return exact
+        names = {row["title"], row.get("remote_file", {}).get("showName")}
+        size = row.get("remote_file", {}).get("size")
+        return [item for item in records if isinstance(item.get("tag"), dict)
+                and item["tag"].get("showName") in names and size
+                and str(item.get("fileSize")) == str(size)
+                and item.get("transId") not in row.get("baseline_ids", [])]
 
     def _process(self, job, row, cookie):
         try:
@@ -374,12 +441,15 @@ class TingwuService:
                                 "roleSplitNum": 0, "translateSwitch": 0, "transTargetValue": "en",
                                 "client": "web", "originalTag": '{"isVideo":1}' if remote.get("isVideo") else ""}}
                 # 听悟会把 fileId 换成 net-source taskId。先记录已有记录，提交后只关联新增项。
-                before = self.bridge.call("find", {"title": row["title"]}).get("data", [])
-                baseline = [item.get("transId") for item in before if isinstance(item, dict)] if isinstance(before, list) else []
-                # 先落盘再发送。响应丢失时恢复只查原任务，绝不自动重复提交。
-                self._update(job, row, submit_sent=True, baseline_ids=baseline, submitted_at=time.time(),
-                             status="submitting", detail="正在提交听悟转写")
-                submitted = self.bridge.call("submit", {"files": [file]})
+                with self._submission_slot(job):
+                    before = self.bridge.call("find", {"title": row["title"]}).get("data", [])
+                    baseline = [item.get("transId") for item in before if isinstance(item, dict)] if isinstance(before, list) else []
+                    # 先落盘再发送。响应丢失时恢复只查原任务，绝不自动重复提交。
+                    self._update(job, row, submit_sent=True, baseline_ids=baseline, submitted_at=time.time(),
+                                 status="submitting", detail="正在提交听悟转写")
+                    submitted = self.bridge.call("submit", {"files": [file]})
+                    self._update(job, row, submit_ack={"code": submitted.get("code"),
+                                 "success": submitted.get("success")})
                 data = submitted.get("data")
                 if isinstance(data, dict) and data.get("transId"):
                     self._update(job, row, trans_id=data["transId"])
@@ -390,39 +460,32 @@ class TingwuService:
                         self._update(job, row, trans_id=matched[0]["transId"])
             self._update(job, row, status="transcribing", detail="听悟转写中，正在跟踪进度")
             deadline = time.monotonic() + 24 * 3600
-            empty = 0
             while not row.get("transcribed"):
                 self._wait(job, 0)
                 if not row.get("trans_id"):
                     # 网页提交接口可能只返回 success，需从任务列表按原 fileId 取得 transId。
                     discovered = self.bridge.call("find", {"title": row["title"]}).get("data", [])
                     if isinstance(discovered, list):
-                        candidates = [item for item in discovered if item.get("taskId") == row["file_id"]
-                                      or item.get("fileId") == row["file_id"]]
-                        if not candidates:
-                            names = {row["title"], row.get("remote_file", {}).get("showName")}
-                            size = row.get("remote_file", {}).get("size")
-                            candidates = [item for item in discovered
-                                if isinstance(item.get("tag"), dict) and item["tag"].get("showName") in names
-                                and size and item.get("fileSize") == size
-                                and item.get("transId") not in row.get("baseline_ids", [])]
+                        candidates = self._remote_candidates(row, discovered)
                         if len(candidates) == 1 and candidates[0].get("transId"):
-                            self._update(job, row, trans_id=candidates[0]["transId"])
+                            self._update(job, row, trans_id=candidates[0]["transId"],
+                                         remote_task_id=candidates[0].get("taskId"))
                         if len(candidates) > 1:
-                            raise BridgeUnavailable("查到多个同名同大小的听悟任务，请在听悟核对后使用记录链接导出，避免关联错误。")
+                            raise TaskConflict("查到多个同名同大小的听悟任务，请在听悟核对后使用记录链接导出，避免关联错误。")
                         self._update(job, row, discovered_ids=[{"task_id": item.get("taskId"),
                                      "trans_id": item.get("transId"), "title": item.get("tag", {}).get("showName"),
                                      "file_size": item.get("fileSize")} for item in discovered[:10]])
-                data = self.bridge.call("status", {"taskIds": [row["file_id"]] if row.get("file_id") else [],
+                task_id = row.get("remote_task_id") or row.get("file_id")
+                data = self.bridge.call("status", {"taskIds": [task_id] if task_id else [],
                                        "transIds": [row["trans_id"]] if row.get("trans_id") else []}).get("data", [])
                 if not isinstance(data, list):
                     raise SubtitleError("听悟任务查询格式已变化。")
-                matching = [item for item in data if (row.get("file_id") and item.get("taskId") == row["file_id"])
+                matching = [item for item in data if (task_id and item.get("taskId") == task_id)
                             or (row.get("trans_id") and item.get("transId") == row["trans_id"])]
                 if not matching:
-                    empty += 1
-                    if empty >= 10:
-                        raise BridgeUnavailable("提交状态待确认：未查到该 fileId。请在听悟核对后继续，避免重复提交。")
+                    if time.time() - row.get("submitted_at", time.time()) > 24 * 3600:
+                        raise TaskConflict("听悟记录超过 24 小时仍未确认，请在听悟核对；本地未重复提交。")
+                    raise RemotePending("已提交，等待听悟生成任务记录；自动查询中，不会重复提交。")
                 else:
                     item = matching[0]
                     if item.get("transId"):
@@ -461,7 +524,13 @@ class TingwuService:
                     files.extend(self._store_documents(job["id"], row["id"], content,
                                                       row["title"] + (f" {index+1}" if len(exports) > 1 else "")))
                 self._update(job, row, status="done", detail="DOCX 和 TXT 已就绪", files=files)
-        except (BridgeUnavailable, InterruptedError) as error:
+        except RemotePending as error:
+            self._update(job, row, status="awaiting_confirmation", detail=str(error),
+                         next_retry_at=time.time() + max(.01, self.interval))
+        except BridgeUnavailable as error:
+            self._update(job, row, status="waiting_connection", detail=str(error) + " 将自动恢复查询。",
+                         next_retry_at=time.time() + max(.01, self.interval))
+        except (TaskConflict, InterruptedError) as error:
             self._update(job, row, status="paused", detail=str(error))
         except Exception as error:
             self._update(job, row, status="error", detail=str(error) if isinstance(error, SubtitleError)

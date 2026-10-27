@@ -54,7 +54,7 @@ class TingwuTests(unittest.TestCase):
         self.bridge = ProtocolBridge()
         self.service = TingwuService(root=self.temp.name, bridge=self.bridge,
                                     downloader=lambda url: document(), interval=.001,
-                                    export_gap=0, retry_delay=.001)
+                                    export_gap=0, retry_delay=.001, submit_gap=0)
 
     def tearDown(self):
         self.service.pool.shutdown(wait=True)
@@ -82,10 +82,77 @@ class TingwuTests(unittest.TestCase):
     def test_lost_submission_response_resume_never_submits_twice(self):
         self.bridge.lose_submit = True
         job = self.service.create({"urls": ["https://test.bilivideo.com/audio.m4s"]})
-        self.assertEqual(self.settled(job["id"])["status"], "paused")
-        self.service.control({"job_id": job["id"], "action": "resume"})
         self.assertEqual(self.settled(job["id"])["status"], "done")
         self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
+
+    def test_more_than_ten_empty_status_responses_auto_recover_without_resubmission(self):
+        original = self.bridge.call
+        queries = 0
+        def call(method, params):
+            nonlocal queries
+            result = original(method, params)
+            if method == "status":
+                queries += 1
+                if queries <= 12:
+                    result["data"] = []
+            return result
+        self.bridge.call = call
+        job = self.service.create({"urls": ["https://test.bilivideo.com/audio.mp4"]})
+        self.assertEqual(self.settled(job["id"])["status"], "done")
+        self.assertEqual(queries, 13)
+        self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
+
+    def test_disconnect_preserves_queue_and_reconnect_resumes_automatically(self):
+        original = self.bridge.call
+        disconnected = threading.Event()
+        def call(method, params):
+            if not disconnected.is_set():
+                self.bridge.online = False
+                disconnected.set()
+                raise BridgeUnavailable("测试断线")
+            return original(method, params)
+        self.bridge.call = call
+        job = self.service.create({"urls": [f"https://test.bilivideo.com/{i}.mp4" for i in range(8)]})
+        self.assertTrue(disconnected.wait(1))
+        time.sleep(.05)
+        snapshot = self.service.snapshot(job["id"])
+        self.assertFalse(any(row["status"] == "paused" for row in snapshot["rows"]))
+        self.assertGreaterEqual(sum(row["status"] == "queued" for row in snapshot["rows"]), 5)
+        self.bridge.online = True
+        self.assertEqual(self.settled(job["id"])["status"], "done")
+
+    def test_resume_offline_waits_for_connection_and_user_pause_still_works(self):
+        self.bridge.online = False
+        job = {"id": "offline-resume", "created": time.time(), "all_pages": False,
+               "status": "paused", "rows": [{"id": "r1", "source": "https://test.bilivideo.com/audio.mp4",
+               "title": "audio", "status": "paused", "files": []}]}
+        self.service.jobs[job["id"]] = job
+        self.service.control({"job_id": job["id"], "action": "resume"})
+        deadline = time.monotonic() + 1
+        while self.service.snapshot(job["id"])["status"] != "waiting_connection" and time.monotonic() < deadline:
+            time.sleep(.005)
+        self.assertEqual(self.service.snapshot(job["id"])["status"], "waiting_connection")
+        self.service.control({"job_id": job["id"], "action": "pause"})
+        self.assertEqual(self.settled(job["id"])["status"], "paused")
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_submissions_are_serialized_and_record_remote_task_id(self):
+        original = self.bridge.call
+        active = maximum = 0
+        def call(method, params):
+            nonlocal active, maximum
+            if method == "submit":
+                active += 1
+                maximum = max(maximum, active)
+                time.sleep(.01)
+            result = original(method, params)
+            if method == "submit":
+                active -= 1
+            return result
+        self.bridge.call = call
+        job = self.service.create({"urls": [f"https://test.bilivideo.com/{i}.mp4" for i in range(4)]})
+        self.assertEqual(self.settled(job["id"])["status"], "done")
+        self.assertEqual(maximum, 1)
 
     def test_submit_without_trans_id_uses_web_task_list(self):
         original = self.bridge.call
@@ -125,6 +192,34 @@ class TingwuTests(unittest.TestCase):
         self.assertEqual(row["status"], "done")
         self.assertEqual(row["trans_id"], "new")
         self.assertEqual(row["baseline_ids"], ["old"])
+        self.assertEqual(row["remote_task_id"], "net-source-new")
+        query = next(params for method, params in self.bridge.calls if method == "status")
+        self.assertEqual(query["taskIds"], ["net-source-new"])
+
+    def test_unconfirmed_existing_task_does_not_block_new_queue_or_resubmit(self):
+        original = self.bridge.call
+        def call(method, params):
+            if method == "status" and params.get("taskIds") == ["missing-file"]:
+                return {"code": "0", "data": []}
+            return original(method, params)
+        self.bridge.call = call
+        job = {"id": "resume-existing", "created": time.time(), "all_pages": False, "status": "paused",
+            "rows": [{"id": "old", "source": "https://test.bilivideo.com/old.mp4", "title": "old",
+                      "status": "paused", "files": [], "submit_sent": True, "file_id": "missing-file",
+                      "submitted_at": time.time(), "remote_file": {"size": 999}},
+                     {"id": "new", "source": "https://test.bilivideo.com/new.mp4", "title": "new",
+                      "status": "paused", "files": []}]}
+        self.service.jobs[job["id"]] = job
+        self.service.control({"job_id": job["id"], "action": "resume"})
+        try:
+            deadline = time.monotonic() + 2
+            while self.service.snapshot(job["id"])["rows"][1]["status"] != "done" and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertEqual(self.service.snapshot(job["id"])["rows"][1]["status"], "done")
+            self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
+        finally:
+            self.service.control({"job_id": job["id"], "action": "pause"})
+            self.settled(job["id"])
 
     def test_ambiguous_new_records_pause_instead_of_exporting_wrong_file(self):
         original = self.bridge.call
