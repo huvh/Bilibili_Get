@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>B 站字幕 → TXT · 独立助手</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f8f5;color:#233a2d;font:15px/1.8 "Segoe UI","Microsoft YaHei",sans-serif}main{max-width:850px;margin:64px auto;padding:0 26px}.eyebrow{font-size:11px;letter-spacing:2px;color:#4b8662}h1{font-size:36px;line-height:1.4;margin:15px 0}h1 span{color:#086b57}.lead{color:#7b8c80}.card{background:white;border:1px solid #dfe8df;border-radius:16px;padding:28px 30px;margin:26px 0}.label{font-size:11px;color:#71957c;letter-spacing:1px}h2{font-size:19px;margin:7px 0 16px}a.primary,button{display:inline-block;border:0;border-radius:8px;padding:12px 20px;background:#086b57;color:white;text-decoration:none;font:inherit;cursor:pointer}.secondary{background:#eaf2eb;color:#286342;padding:7px 13px;font-size:12px;margin-left:9px}small,.note{font-size:12px;color:#839385}.steps{font-size:14px;padding-left:21px;color:#5f7867}.steps li{padding-bottom:7px}.upload{display:flex;flex-direction:column;gap:12px;align-items:center;padding:27px;border:1px dashed #abc5b2;border-radius:9px;background:#f9fcf9;cursor:pointer;text-align:center}.upload.over{background:#e7f3e9}.upload strong{font-size:15px}.upload span{font-size:12px;color:#839485}input{max-width:100%;font:inherit;font-size:12px}textarea{width:100%;border:1px solid #d0ded2;border-radius:7px;padding:11px;margin:10px 0;font:12px/1.6 Consolas,monospace;resize:vertical}details{margin-top:20px}summary{font-size:12px;color:#688774;cursor:pointer}#status{margin-top:15px;padding:13px 16px;border-radius:7px;background:#edf5ee;font-size:13px;overflow-wrap:anywhere;white-space:pre-wrap}#status.error{background:#fcf0ec;color:#9b5235}#result{border-top:1px solid #e7ede7;margin-top:18px;padding-top:15px}#result a{color:#086b57}pre{max-height:200px;overflow:auto;white-space:pre-wrap;font:12px/1.8 "Microsoft YaHei",sans-serif;background:#f6f9f6;padding:14px;border-radius:7px}footer{font-size:11px;color:#8b9a8f;padding:4px 0 30px}button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #76ac89;outline-offset:3px}[hidden]{display:none!important}@media(max-width:600px){main{margin:35px auto;padding:0 18px}h1{font-size:29px}.card{padding:21px 19px}.secondary{margin:12px 0 0;display:block}a.primary{text-align:center}}
+main{max-width:960px;margin:0 auto;padding:0 30px}
+__NAV_STYLE__
+</style></head>
+<body>
+<header class="topbar"><a class="brand" href="http://127.0.0.1:8765/"><span class="brand-icon">B</span>B 站工作台<span class="local-tag">LOCAL</span></a><span class="connection"><i></i>本地运行</span></header>
+<main>
+__APP_NAV__
+<section class="helper-intro">
+<p class="eyebrow">BILIBILI · STANDALONE HELPER</p>
+<h1>取到字幕，<span>直接变成 TXT。</span></h1>
+<p class="lead">一个独立助手：在 B 站页面提取，或把已有 JSON 自动转成文字。</p>
+</section>
+<section class="card" aria-labelledby="bookmark-title"><span class="label">01 / 视频页直接下载</span><h2 id="bookmark-title">把这个按钮拖到书签栏</h2>
+<a class="primary" id="bookmark" draggable="true" href="#">B 站字幕转 TXT</a><button id="copy" class="secondary">复制书签代码</button>
+<ol class="steps"><li>把绿色按钮拖到浏览器书签栏，只需安装一次。</li><li>打开已登录的 B 站 BV / av 视频页，点击这个书签。</li><li>助手获取字幕 JSON 后自动生成 TXT 并下载；多轨字幕会先让你选语言。</li></ol>
+<p class="note">书签包含完整程序，安装后不需要启动本地服务。支持当前分 P，以及直接打开的 B 站字幕 JSON 页面。旧版书签需要替换成新版。</p>
+<details id="manual"><summary>无法拖动？手动安装书签</summary><p class="note">新建一个浏览器书签，名称填“B 站字幕转 TXT”，网址填下方完整代码。不要直接把代码粘贴进地址栏。</p><textarea id="bookmark-code" aria-label="完整书签代码" rows="4" readonly></textarea></details>
+</section>
+<section class="card" aria-labelledby="file-title"><span class="label">02 / 已有 JSON 自动转换</span><h2 id="file-title">选择文件，自动下载 TXT</h2>
+<label class="upload" id="drop" for="file"><strong>选择或拖放字幕 JSON 文件</strong><span>支持原生 BCC 和旧版助手 JSON · 最大 8 MB</span><input id="file" type="file" accept=".json,.bcc,application/json"></label>
+<details><summary>也可以直接粘贴 JSON</summary><textarea id="json" aria-label="字幕 JSON 内容" rows="5" placeholder='{"body":[{"from":0,"to":2,"content":"字幕内容"}]}'></textarea><button id="convert">转为 TXT 并下载</button></details>
+<div id="status" role="status" aria-live="polite" hidden></div>
+<div id="result" hidden><a id="download" download>再次下载 TXT</a><pre id="preview" aria-label="TXT 预览"></pre></div>
+</section><footer>TXT 使用 UTF-8 编码，逐句换行，保留原文。文件转换完全在浏览器内完成，JSON 不会上传。</footer>
+</main><script>
+__CORE__
+const bookmarklet = __BOOKMARKLET__;
+const tools = createSubtitleTools();
+const $ = (selector) => document.querySelector(selector);
+const workbenchOrigin = location.protocol === "http:" && location.hostname === "127.0.0.1"
+    ? location.origin : "http://127.0.0.1:8765";
+$("#subtitle-mode").href = workbenchOrigin + "/";
+$("#video-mode").href = workbenchOrigin + "/?tool=video";
+$("#helper-mode").href = workbenchOrigin + "/helper";
+$(".brand").href = workbenchOrigin + "/";
+$("#bookmark").href = bookmarklet;
+$("#bookmark-code").value = bookmarklet;
+let currentUrl;
+let pendingConversion = 0;
+
+function showStatus(message, error = false) {
+    $("#status").hidden = !message;
+    $("#status").textContent = message;
+    $("#status").classList.toggle("error", error);
+}
+
+function clearResult() {
+    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    currentUrl = undefined;
+    $("#result").hidden = true;
+    $("#download").removeAttribute("href");
+    $("#preview").textContent = "";
+}
+
+function convertText(text, fallbackTitle) {
+    clearResult();
+    let input;
+    try { input = JSON.parse(text.replace(/^\uFEFF/, "")); }
+    catch { throw new Error("JSON 格式无效，请选择字幕 JSON 文件。"); }
+    const result = tools.convert(input);
+    const title = typeof input.title === "string" ? input.title : fallbackTitle;
+    const language = typeof input.language_tag === "string" ? input.language_tag : "";
+    const name = tools.filename(title, language);
+    currentUrl = URL.createObjectURL(new Blob(["\uFEFF", result.text], { type: "text/plain;charset=utf-8" }));
+    $("#download").href = currentUrl;
+    $("#download").download = name;
+    $("#result").hidden = false;
+    $("#preview").textContent = result.text.slice(0, 4000);
+    $("#download").click();
+    showStatus(`已将 ${result.count} 条字幕转为 TXT，并请求浏览器下载。\n${name}\n未自动下载时，请点击“再次下载 TXT”。`);
+}
+
+async function convertFile(file) {
+    if (!file) return;
+    const generation = ++pendingConversion;
+    clearResult();
+    if (file.size > 8 * 1024 * 1024) return showStatus("文件超过 8 MB。", true);
+    showStatus("正在读取 JSON 并转换 TXT…");
+    try {
+        const text = await file.text();
+        if (generation !== pendingConversion) return;
+        convertText(text, file.name);
+    } catch (error) { if (generation === pendingConversion) showStatus(error.message, true); }
+}
+
+$("#bookmark").addEventListener("click", (event) => {
+    event.preventDefault();
+    $("#manual").open = true;
+    showStatus("请把绿色按钮拖到书签栏，再到 B 站视频页点击书签。也可以复制代码，手动创建书签。");
+});
+$("#copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(bookmarklet); showStatus("书签代码已复制。请新建书签，并将代码粘贴到书签的网址栏。"); }
+    catch { $("#manual").open = true; $("#bookmark-code").select(); showStatus("代码已选中，请按 Ctrl+C 复制。"); }
+});
+$("#file").addEventListener("change", (event) => {
+    convertFile(event.target.files[0]);
+    event.target.value = "";
+});
+$("#convert").addEventListener("click", () => {
+    pendingConversion++;
+    try { convertText($("#json").value, "B站字幕"); }
+    catch (error) { showStatus(error.message, true); }
+});
+$("#drop").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("over"); });
+$("#drop").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("over"));
+$("#drop").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("over"); convertFile(event.dataTransfer.files[0]); });
+window.addEventListener("pagehide", clearResult);
+</script></body></html>

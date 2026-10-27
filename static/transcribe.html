@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>批量转写 · B 站工作台</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/navigation.css">
+    <script src="/cookie-extension.js" defer></script>
+    <script src="/tingwu-pages.js" defer></script>
+    <script src="/tingwu.js" defer></script>
+</head>
+<body>
+    <header class="topbar"><a class="brand" href="/"><span class="brand-icon">B</span>B 站工作台<span class="local-tag">LOCAL</span></a><span class="connection"><i></i>本地运行</span></header>
+    <main>
+        __APP_NAV__
+        <section class="intro">
+            <p class="eyebrow">BATCH TRANSCRIPTION</p>
+            <h1>批量视频<span>转写</span></h1>
+            <p class="lead">批量解析 B 站视频，提交听悟转写，自动导出 DOCX 和 TXT。</p>
+        </section>
+        <section id="tingwu-workspace" class="input-card tw-workspace" aria-label="听悟批量转写工作台">
+            <div class="tw-heading"><div><p class="eyebrow">BATCH TRANSCRIPTION</p><h2>听悟批量任务</h2></div><span id="tw-connection" class="tw-connection">○ 尚未连接听悟</span></div>
+            <p class="tw-flow">解析 CDN 直链 <span>→</span> 提交听悟 <span>→</span> 跟踪转写 <span>→</span> 导出 DOCX <span>→</span> 转为 TXT</p>
+            <details id="tw-connect-help" open><summary>首次使用：连接你的听悟网页</summary>
+                <p class="tw-help">把下面的按钮拖到浏览器书签栏，在已登录的听悟网页点击该书签。连接后会打开批量转写页面；请保持听悟页和这个工作台打开。</p>
+                <div class="tw-actions"><a id="tw-bookmark" class="secondary" href="#" draggable="true">连接听悟工作台</a><a class="secondary" href="https://tingwu.aliyun.com/home" target="_blank" rel="noopener">打开听悟</a></div>
+                <p class="field-hint">使用听悟网页当前账号；无需 AccessKey，听悟登录 Cookie 不会导出或保存到本机。</p>
+            </details>
+            <form id="tw-form">
+                <label for="tw-urls">批量 B 站链接 / BV 号 / CDN 直链 / 听悟记录链接（每行一条）</label>
+                <textarea id="tw-urls" rows="5" required spellcheck="false" placeholder="https://www.bilibili.com/video/BV…?p=1&#10;https://…bilivideo.com/…"></textarea>
+                <div class="tw-page-status"><p id="tw-page-summary" class="field-hint" role="status" aria-live="polite">粘贴链接后自动识别多 P 视频，弹窗勾选需要转写的分 P。</p><button id="tw-page-edit" type="button" class="secondary" hidden>选择分 P</button></div>
+                <p class="field-hint">已有听悟记录可直接粘贴记录链接，只跟踪并导出，不会重复转写。</p>
+                <details><summary>B 站登录选项</summary><label for="tw-cookie">B 站 Cookie（可选，仅当前批次解析时使用）</label><input id="tw-cookie" type="password" autocomplete="off" placeholder="匿名可解析的视频不需要填写"><p class="field-hint">不写入磁盘；暂停后需要重新解析受限视频时，可直接使用已取得的 CDN 直链。</p></details>
+                <button id="tw-start" class="primary" type="submit" disabled>开始批量转写 →</button>
+            </form>
+            <div id="tw-message" class="video-message" role="status" aria-live="polite" hidden></div>
+            <p id="tw-empty" class="tw-empty">还没有批次。连接听悟后即可开始批量转写。</p>
+            <div id="tw-jobs" aria-label="听悟批次与文件"></div>
+        </section>
+        <dialog id="tw-page-dialog" class="tw-page-dialog" aria-labelledby="tw-page-title" aria-describedby="tw-page-hint">
+            <div class="tw-page-heading"><div><p class="eyebrow">SELECT PARTS</p><h2 id="tw-page-title">选择要转写的分 P</h2></div><button id="tw-page-cancel" type="button" class="secondary">取消</button></div>
+            <p id="tw-page-hint" class="tw-help">已识别到多 P 内容。勾选需要转写的分 P，确认后再开始批量转写。</p>
+            <div id="tw-page-list" class="tw-page-list"></div>
+            <div class="tw-page-footer"><p id="tw-page-count" role="status" aria-live="polite"></p><button id="tw-page-confirm" type="button" class="primary">确认选择</button></div>
+        </dialog>
+        <footer>B 站工作台 <span>批量转写 · DOCX 与 TXT 自动导出</span></footer>
+    </main>
+</body>
+</html>

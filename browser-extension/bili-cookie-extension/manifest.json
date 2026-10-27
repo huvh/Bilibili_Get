@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "B站Cookie获取扩展",
+  "version": "1.0.0",
+  "description": "将当前浏览器的 B 站登录态自动填入本机 B 站工作台，仅支持 127.0.0.1:8765。",
+  "permissions": ["cookies"],
+  "host_permissions": ["https://*.bilibili.com/*", "http://127.0.0.1/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_title": "打开 B 站批量转写工作台"},
+  "incognito": "not_allowed",
+  "content_scripts": [{
+    "matches": ["http://127.0.0.1/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle",
+    "all_frames": false
+  }]
+}

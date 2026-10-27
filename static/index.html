@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>B 站工作台 · 视频与字幕下载</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/navigation.css">
+    <script src="/cookie-extension.js" defer></script>
+    <script src="/app.js" defer></script>
+    <script src="/video.js" defer></script>
+</head>
+<body>
+    <header class="topbar"><a class="brand" href="/"><span class="brand-icon">B</span>B 站工作台<span class="local-tag">LOCAL</span></a><span class="connection"><i></i>本地运行</span></header>
+    <main>
+        __APP_NAV__
+        <section class="intro">
+            <p class="eyebrow">BILIBILI LOCAL STUDIO</p>
+            <h1>把视频里的好内容，<br><span>留在本地。</span></h1>
+            <p class="lead">下载 B 站视频、提取已有字幕，把你需要的内容保存下来。</p>
+        </section>
+        <div id="subtitle-workspace">
+        <section class="input-card" aria-label="字幕来源">
+            <div class="tabs" role="tablist" aria-label="选择输入方式">
+                <button class="active" id="link-tab" role="tab" aria-selected="true" aria-controls="link-panel">↗ 视频 / 字幕链接</button>
+                <button id="file-tab" role="tab" aria-selected="false" aria-controls="file-panel">＋ 导入字幕文件</button>
+            </div>
+            <div id="link-panel" role="tabpanel" aria-labelledby="link-tab">
+                <form id="extract-form">
+                    <label for="source-url">粘贴 B 站链接或 BV 号</label>
+                    <div class="url-row"><input id="source-url" required autocomplete="off" spellcheck="false" placeholder="https://www.bilibili.com/video/BV…?p=2"><button class="primary" id="extract-button" type="submit">提取字幕 <span>→</span></button></div>
+                    <p class="field-hint">支持 BV / av / ep、分 P、b23.tv 分享链接，以及 B 站字幕 JSON 直链</p>
+                    <details id="login-options"><summary>需要登录的字幕？<span>登录选项与导入助手</span></summary>
+                        <label for="cookie">你的 B 站 Cookie（可选，仅本次请求使用）</label>
+                        <input id="cookie" type="password" autocomplete="off" placeholder="在这里粘贴自己的 Cookie 请求头">
+                        <p class="field-hint">Cookie 仅发往 B 站 API；不保存到磁盘、浏览器存储或提取历史。</p>
+                        <p class="field-hint">也可以从顶部“独立字幕助手”标签进入，用已登录的 B 站网页直接导出 TXT。</p>
+                    </details>
+                </form>
+            </div>
+            <div id="file-panel" role="tabpanel" aria-labelledby="file-tab" hidden>
+                <label class="dropzone" id="dropzone" for="bcc-file"><span class="file-icon">{ }</span><strong>选择 BCC JSON 字幕文件</strong><span>也可以拖放文件到这里 · 最大 8 MB</span><input id="bcc-file" type="file" accept=".json,.bcc,application/json"></label>
+                <details><summary>或粘贴 BCC JSON</summary><label for="json-text" class="sr-only">BCC JSON 内容</label><textarea id="json-text" rows="5" spellcheck="false" placeholder='{"body": [{"from": 0, "to": 2, "content": "字幕内容"}]}'></textarea><button id="import-json" class="secondary">导入 JSON</button></details>
+            </div>
+            <div id="message" role="status" aria-live="polite" hidden></div>
+        </section>
+        <div class="features" id="features"><span><b>01</b>已有字幕直接提取</span><span><b>02</b>保留逐句时间轴</span><span><b>03</b>五种格式自由下载</span></div>
+        <section id="result" class="result-card" aria-label="提取结果" hidden>
+            <div class="result-heading"><div><p class="eyebrow">YOUR TRANSCRIPT</p><h2 id="video-title"></h2><p id="video-meta"></p></div><span class="ready-tag">● 字幕已就绪</span></div>
+            <div class="selectors"><label>字幕轨道<select id="track-select" aria-label="字幕轨道"></select></label><label id="page-wrap" hidden>视频分 P<select id="page-select" aria-label="视频分 P"></select></label></div>
+            <div class="transcript-toolbar"><div class="view-tabs" role="group" aria-label="文字稿视图"><button class="active" data-view="plain" aria-pressed="true">文字稿</button><button data-view="timestamped" aria-pressed="false">时间戳</button><button data-view="raw" aria-pressed="false">逐句字幕</button></div><button id="copy-text" class="text-button">复制文字</button></div>
+            <div class="search-row"><input id="search" type="search" aria-label="搜索字幕" placeholder="搜索字幕内容…"><span id="cue-count"></span></div>
+            <div class="transcript" id="transcript" tabindex="0" aria-label="字幕正文"></div>
+            <div class="download-bar"><div><strong>带走这份字幕</strong><small>文字整理、视频剪辑或程序处理</small></div><div class="download-actions"><a data-format="txt">TXT</a><a data-format="timestamped">时间戳 TXT</a><a data-format="srt">SRT</a><a data-format="vtt">VTT</a><a data-format="json">JSON</a></div></div>
+            <p class="cache-note">字幕会话保留 25 分钟。直链过期后，请重新提取。</p>
+        </section>
+        </div>
+        <section id="video-workspace" aria-label="视频下载工作台" hidden>
+            <div class="input-card">
+                <p class="eyebrow">VIDEO DOWNLOAD</p>
+                <form id="video-form"><label for="video-url">粘贴 B 站视频链接或 BV 号</label>
+                    <div class="url-row"><input id="video-url" required autocomplete="off" spellcheck="false" placeholder="https://www.bilibili.com/video/BV…?p=2"><button class="primary" id="video-inspect" type="submit">解析视频 →</button></div>
+                    <p class="field-hint">支持 BV / av、分 P、b23.tv 与番剧单集。只显示本次请求实际可用的清晰度。</p>
+                    <details><summary>登录选项<span>使用你自己的 B 站权限获取更多清晰度</span></summary><label for="video-cookie">B 站 Cookie（可选，仅本次解析使用）</label><input id="video-cookie" type="password" autocomplete="off" placeholder="可留空；仅发往 B 站 API，不保存"><p class="field-hint">安装 Cookie 扩展后会自动填入，切换分 P 也会自动补取；未安装时可手动填写。</p></details>
+                </form>
+                <div id="video-message" class="video-message" role="status" aria-live="polite" hidden></div>
+            </div>
+            <section id="video-info" class="result-card" aria-label="视频解析结果" hidden>
+                <div class="result-heading"><div><p class="eyebrow">YOUR VIDEO</p><h2 id="video-name"></h2><p id="video-description" class="video-meta"></p></div><span class="ready-tag">● 已解析</span></div>
+                <div class="selectors"><label>下载清晰度<select id="video-format" aria-label="视频清晰度"></select></label><label id="video-page-wrap" hidden>视频分 P<select id="video-page" aria-label="下载视频分 P"></select></label></div>
+                <p id="video-format-note" class="video-format-note"></p>
+                <div class="video-start-row"><button id="video-start" class="primary">下载 MP4（含声音） ↓</button><span>音视频自动合并，无需手动处理</span></div>
+            </section>
+            <section id="video-job" class="result-card video-job" aria-label="视频下载任务" hidden>
+                <div class="video-job-top"><strong id="video-job-stage">准备下载</strong><button id="video-cancel" class="text-button">取消下载</button></div>
+                <p id="video-job-name"></p><progress id="video-progress" max="1" value="0" aria-label="视频下载进度"></progress>
+                <p id="video-job-detail" role="status" aria-live="polite"></p>
+                <a id="video-save" class="secondary" download hidden>保存 MP4 到电脑 ↓</a>
+                <video id="video-preview" controls preload="metadata" hidden aria-label="已下载视频预览"></video>
+                <p class="cache-note">完成文件也会保存在项目的 downloads 文件夹。关闭网页不会取消已启动的任务。</p>
+            </section>
+
+        </section>
+        <section class="notes"><div><span>关于提取</span><p>字幕功能读取已有字幕；视频功能将实际可用的视频与音轨合并为 MP4。</p></div><div><span>关于访问</span><p>清晰度和内容范围取决于 B 站返回结果及你的登录权限。</p></div><div><span>关于本地</span><p>页面、下载与转换服务运行在你的电脑上，直接访问 B 站。</p></div></section>
+        <footer>B 站工作台 <span>从声音到文字，让知识更容易留下来。</span></footer>
+    </main>
+</body>
+</html>

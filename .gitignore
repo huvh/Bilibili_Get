@@ -1,0 +1,25 @@
+# 本地运行数据与依赖，不进入源码或发布包。
+__pycache__/
+*.py[cod]
+*.log
+.env
+.env.*
+!.env.example
+.deps/
+.venv/
+venv/
+node_modules/
+downloads/
+tingwu_exports/
+dist/
+evidence/
+output/
+.DS_Store
+Thumbs.db
+
+# 两个独立功能提供开箱即用的产物。
+!helper/dist/
+!helper/dist/*.html
+!helper/dist/bookmarklet.txt
+!browser-extension/dist/
+!browser-extension/dist/*.zip

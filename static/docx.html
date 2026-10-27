@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DOCX 转 TXT · B 站工作台</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/navigation.css">
+    <script src="/docx.js" defer></script>
+</head>
+<body>
+    <header class="topbar"><a class="brand" href="/"><span class="brand-icon">B</span>B 站工作台<span class="local-tag">LOCAL</span></a><span class="connection"><i></i>本地转换</span></header>
+    <main>
+        __APP_NAV__
+        <section class="intro">
+            <p class="eyebrow">DOCUMENT CONVERTER</p>
+            <h1>DOCX 批量转 <span>TXT</span></h1>
+            <p class="lead">选择文档或 ZIP，保留正文、时间戳与表格文字，按原文件名生成 TXT。</p>
+        </section>
+        <section class="input-card" aria-label="导入 DOCX 文档">
+            <label id="docx-drop" class="dropzone" for="docx-files">
+                <span class="file-icon">Aa</span><strong>拖入 DOCX / ZIP，或点击选择</strong>
+                <span>可一次选择多个文件 · ZIP 自动读取其中的 DOCX · 每个文件最大 64 MB</span>
+                <input id="docx-files" type="file" multiple accept=".docx,.zip">
+            </label>
+            <p class="field-hint">文件仅发到本机处理，无需登录或连接听悟；原文档保持不变，输出为 UTF-8 TXT。</p>
+            <div id="docx-message" class="video-message" role="status" aria-live="polite" hidden></div>
+        </section>
+        <section class="result-card docx-results" aria-label="DOCX 转换结果">
+            <div class="result-heading"><div><p class="eyebrow">YOUR TEXT FILES</p><h2>转换结果</h2><p class="video-meta">按批次查看，单独下载或打包保存。</p></div></div>
+            <p id="docx-empty" class="docx-empty">还没有转换记录。选择上方文件即可开始。</p>
+            <div id="docx-jobs"></div>
+        </section>
+        <footer>B 站工作台 <span>DOCX → TXT · 本地批量转换</span></footer>
+    </main>
+</body>
+</html>

@@ -1,0 +1,54 @@
+# 架构与数据边界
+
+## 功能模块
+
+| 模块 | 输入 | 输出 / 职责 |
+| --- | --- | --- |
+| `bilibili.py` | B 站地址、BV / av / ep、可选 Cookie | 标准化地址、视频元数据、分 P、字幕轨道与 BCC |
+| `subtitles.py` | BCC JSON | 过滤后的字幕、段落与 TXT / SRT / VTT / JSON |
+| `video.py` | 视频来源、档位、取消信号 | 媒体下载、FFmpeg 合并、任务状态、MP4 |
+| `tingwu.py` | 选中的来源、浏览器桥接响应 | 转写批次、重试与恢复、DOCX / TXT / ZIP |
+| `docx_to_txt.py` | DOCX | UTF-8 TXT；供命令行和网页复用 |
+| `cookie_extension.py` | 固定扩展源文件 | 扩展版本、本机安装目录、白名单 ZIP |
+| `server.py` | 本机 HTTP 请求 | 参数校验、固定路由、任务调用和文件下载 |
+| `navigation.py` | 当前页面标识 | 五页面共享导航及样式 |
+
+`static/app.js` 处理字幕；`video.js` 处理单视频下载；`tingwu.js` 负责转写连接和批次；
+`tingwu-pages.js` 负责多 P 识别与选择；`docx.js` 负责手动文档导入。
+`cookie-extension.js` 是页面与浏览器扩展的内存桥接适配。
+
+## 多 P 数据流
+
+1. 文本框输入后防抖 450 ms，最多同时识别三条链接。
+2. `POST /api/tingwu/inspect` 只读取 B 站元数据，CDN 和已有听悟记录直接透传。
+3. 按视频 ID 合并分 P 列表，弹窗收集选择。输入变化时丢弃过时结果的展示。
+4. 选择确认后生成每个 P 的标准链接；`/api/tingwu/start` 收到 `all_pages: false`，不再次展开。
+5. 单 P 视频、CDN 和已有听悟记录保留各自处理方式。
+
+## 听悟与恢复
+
+连接书签运行在已登录的听悟页面，打开带配对标识的本地转写页。
+来源、窗口和配对码共同限定 `postMessage` 通信；本地只允许解析、提交、查询和导出等固定操作。
+桥接通过本地长轮询接收操作，听悟 Cookie 不传到本地服务。
+
+提交前持久化 fileId；响应丢失时按原标识查询，避免自动重复提交。
+导出串行执行，下载真实 DOCX 后复用转换器生成 TXT。暂停不会撤销远端任务。
+服务重启后未完成任务转为暂停，需要用户连接听悟后继续。
+
+## 本地文件
+
+| 路径 | 用途 | 公开发布 |
+| --- | --- | --- |
+| `downloads/<视频任务ID>/` | 视频文件与临时下载 | 排除 |
+| `downloads/tingwu/` | 转写状态、配对码、CDN 地址、DOCX / TXT | 排除 |
+| `tingwu_exports/` | 命令行默认导入位置 | 排除 |
+| `.deps/` | 本机 FFmpeg 等依赖 | 排除 |
+| `dist/` | 按功能生成的发布包 | 作为 Release 附件 |
+| `browser-extension/dist/` | 无用户数据的扩展 ZIP | 包含 |
+| `helper/dist/` | 自包含 HTML 与书签 | 包含 |
+
+Cookie 不缓存、不持久化，不进入任务文件；B 站 Cookie 仅发送到 `api.bilibili.com`。
+媒体和字幕下载使用允许的域名及地址校验；本机服务仅暴露白名单页面与接口，不直接开放项目目录。
+HTTP 拒绝跨站 API 调用，允许听悟书签导航至对应工作台页面。
+
+公开仓库不含历史分析中下载的第三方前端资源、真实字幕正文、个人结果、账号 Cookie 或配对码。
