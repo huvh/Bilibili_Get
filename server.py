@@ -224,7 +224,7 @@ class Handler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             if parsed.path == "/api/health":
                 return self.send_json({"ok": True, "service": "local-bilibili-subtitle", "tingwu": True,
-                                       "tingwu_recovery": 2})
+                                       "tingwu_recovery": 3})
             if parsed.path == "/api/cookie-extension/info":
                 return self.send_json(extension_info())
             if parsed.path == "/api/cookie-extension/download":

@@ -85,6 +85,75 @@ class TingwuTests(unittest.TestCase):
         self.assertEqual(self.settled(job["id"])["status"], "done")
         self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
 
+    def test_parse_failures_refresh_source_and_rotate_backup_before_single_submit(self):
+        original = self.bridge.call
+        attempts = 0
+        self.service.video = Mock()
+        self.service.video.transcription_source.return_value = {
+            "title": "课程", "cdn_url": "https://one.bilivideo.com/audio.mp4",
+            "cdn_urls": ["https://one.bilivideo.com/audio.mp4", "https://two.bilivideo.com/audio.mp4"]}
+        def call(method, params):
+            nonlocal attempts
+            result = original(method, params)
+            if method == "parse_status":
+                attempts += 1
+                if attempts <= 2:
+                    result["data"] = {"status": 1}
+            return result
+        self.bridge.call = call
+        job = self.service.create({"urls": ["BV1th411z7sn"]})
+        result = self.settled(job["id"])
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(self.service.video.transcription_source.call_count, 3)
+        urls = [params["url"] for method, params in self.bridge.calls if method == "parse"]
+        self.assertEqual(urls, ["https://one.bilivideo.com/audio.mp4", "https://two.bilivideo.com/audio.mp4",
+                                "https://one.bilivideo.com/audio.mp4"])
+        self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
+
+    def test_permanent_parse_failure_stops_after_three_retries_without_submitting(self):
+        original = self.bridge.call
+        def call(method, params):
+            result = original(method, params)
+            if method == "parse_status":
+                result["data"] = {"status": 1}
+            return result
+        self.bridge.call = call
+        job = self.service.create({"urls": ["https://test.bilivideo.com/audio.mp4"]})
+        result = self.settled(job["id"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["rows"][0]["parse_attempts"], 4)
+        self.assertIn("自动重试 3 次", result["rows"][0]["detail"])
+        self.assertEqual(sum(method == "parse" for method, _ in self.bridge.calls), 4)
+        self.assertNotIn("submit", [method for method, _ in self.bridge.calls])
+
+    def test_browser_timeout_before_submission_retries_parse(self):
+        original = self.bridge.call
+        first = True
+        def call(method, params):
+            nonlocal first
+            if method == "parse" and first:
+                first = False
+                raise SubtitleError("听悟响应超时", "tingwu_timeout", 502)
+            return original(method, params)
+        self.bridge.call = call
+        job = self.service.create({"urls": ["https://test.bilivideo.com/audio.mp4"]})
+        result = self.settled(job["id"])
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["rows"][0]["parse_attempts"], 2)
+
+    def test_browser_timeout_after_submission_only_queries_existing_task(self):
+        original = self.bridge.call
+        def call(method, params):
+            result = original(method, params)
+            if method == "submit":
+                raise SubtitleError("听悟响应超时", "tingwu_timeout", 502)
+            return result
+        self.bridge.call = call
+        job = self.service.create({"urls": ["https://test.bilivideo.com/audio.mp4"]})
+        self.assertEqual(self.settled(job["id"])["status"], "done")
+        self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
+        self.assertEqual(sum(method == "parse" for method, _ in self.bridge.calls), 1)
+
     def test_more_than_ten_empty_status_responses_auto_recover_without_resubmission(self):
         original = self.bridge.call
         queries = 0

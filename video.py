@@ -154,7 +154,7 @@ class VideoClient:
         for fmt in formats:
             if fmt["mode"] == "progressive" and len(fmt["segments"]) == 1:
                 title = view["title"] + (f" P{page['page']} {page.get('part', '')}" if len(view["pages"]) > 1 else "")
-                return {"title": title, "cdn_url": fmt["segments"][0][0]}
+                return {"title": title, "cdn_url": fmt["segments"][0][0], "cdn_urls": fmt["segments"][0]}
         raise SubtitleError("当前视频没有听悟可直接读取的完整 MP4 CDN；请提供可导入听悟的音视频直链。",
                             "no_tingwu_media", 422)
 

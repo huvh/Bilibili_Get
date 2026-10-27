@@ -118,6 +118,8 @@ class BrowserBridge:
             if not item["event"].wait(85):
                 raise BridgeUnavailable("听悟网页响应超时。恢复连接后点击继续，已提交任务不会重复提交。")
             if item["error"]:
+                if "超时" in item["error"] or "Failed to fetch" in item["error"]:
+                    raise SubtitleError(item["error"], "tingwu_timeout", 502)
                 raise SubtitleError(item["error"], "tingwu_request", 502)
             result = item["result"]
             if not isinstance(result, dict):
@@ -166,7 +168,7 @@ class TingwuService:
     """本地任务持久化；远端提交前记录 fileId，恢复时只查询，避免重复转写。"""
 
     def __init__(self, root=None, bridge=None, video=None, downloader=None, interval=12,
-                 export_gap=5, retry_delay=5, submit_gap=2):
+                 export_gap=5, retry_delay=5, submit_gap=2, parse_retries=3):
         self.root = Path(root or ROOT / "downloads" / "tingwu")
         self.bridge = bridge or BrowserBridge(self.root / ".bridge-key")
         self.video = video or VideoClient()
@@ -177,6 +179,7 @@ class TingwuService:
         self.last_export = 0
         self.submit_lock = threading.Lock()
         self.last_submit, self.submit_gap = 0, submit_gap
+        self.parse_retries = parse_retries
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tingwu")
         self.jobs, self.running, self.stops = {}, set(), {}
@@ -268,6 +271,8 @@ class TingwuService:
             job.update(status="running", error=None)
             for row in job["rows"]:
                 if row["status"] != "done":
+                    if not row.get("submit_sent") and not row.get("file_id"):
+                        row["parse_attempts"] = 0
                     row.update(status="queued", next_retry_at=0, detail="等待恢复原任务" if row.get("submit_sent") else "等待解析")
             self._save()
         threading.Thread(target=self._run, args=(job, cookie), daemon=True).start()
@@ -374,7 +379,24 @@ class TingwuService:
         self._update(job, row, status="resolving", detail="正在解析带声音的完整 MP4 CDN 直链")
         metadata = self.video.transcription_source(row["source"], cookie)
         self._update(job, row, title=metadata["title"])
-        return metadata["cdn_url"]
+        urls = metadata.get("cdn_urls") or [metadata["cdn_url"]]
+        return urls[(max(1, row.get("parse_attempts", 1)) - 1) % len(urls)]
+
+    def _retry_parse(self, job, row, error):
+        """仅对尚未提交、没有有效 fileId 的临时解析失败执行有界重试。"""
+        eligible = (not row.get("submit_sent") and not row.get("file_id")
+                    and isinstance(error, SubtitleError) and error.code in {
+                        "cdn_parse", "tingwu_timeout", "network_error", "upstream_http"})
+        if not eligible:
+            return False
+        attempt = row.get("parse_attempts", 1)
+        if attempt > self.parse_retries:
+            self._update(job, row, status="error", detail=f"{error} 已自动重试 {self.parse_retries} 次仍失败。")
+            return True
+        delay = min(60, self.retry_delay * 2 ** (attempt - 1))
+        self._update(job, row, status="retry_wait", next_retry_at=time.time() + delay,
+                     detail=f"{error} {delay:g} 秒后重新解析（重试 {attempt}/{self.parse_retries}，尚未提交转写）。")
+        return True
 
     @contextmanager
     def _submission_slot(self, job):
@@ -413,13 +435,14 @@ class TingwuService:
                 self._update(job, row, trans_id=existing[1], submit_sent=True,
                              title="听悟记录 " + existing[1])
             if not row.get("file_id") and not row.get("trans_id"):
+                self._update(job, row, parse_attempts=row.get("parse_attempts", 0) + 1)
                 cdn = self._resolve(job, row, cookie)
                 self._update(job, row, cdn_url=cdn, status="remote_parsing", detail="听悟正在解析 CDN 文件")
                 # 过期的 CDN 不复用；每次尚未提交的重试重新解析来源。
                 parsed = self.bridge.call("parse", {"url": cdn})
                 task = parsed.get("data", {}).get("taskId")
                 if not task:
-                    raise SubtitleError("听悟未返回链接解析任务 ID。")
+                    raise SubtitleError("听悟未返回链接解析任务 ID。", "cdn_parse", 502)
                 deadline = time.monotonic() + 300
                 while True:
                     self._wait(job, 0)
@@ -427,12 +450,13 @@ class TingwuService:
                     if result.get("status") == 0:
                         urls = result.get("urls", [])
                         if len(urls) != 1 or not urls[0].get("fileId"):
-                            raise SubtitleError("听悟没有返回唯一有效的 CDN 文件，未提交。")
+                            raise SubtitleError("听悟没有返回唯一有效的 CDN 文件，未提交。", "cdn_parse", 502)
                         remote = urls[0]
                         self._update(job, row, file_id=remote["fileId"], remote_file=remote)
                         break
                     if result.get("status") != -1 or time.monotonic() > deadline:
-                        raise SubtitleError("听悟无法解析该 CDN 直链，请检查直链是否过期或需要 Referer。")
+                        raise SubtitleError("听悟无法解析该 CDN 直链，请检查直链是否过期或需要 Referer。",
+                                            "cdn_parse", 502)
                     self._wait(job, 3)
             if not row.get("submit_sent"):
                 remote = row["remote_file"]
@@ -533,8 +557,13 @@ class TingwuService:
         except (TaskConflict, InterruptedError) as error:
             self._update(job, row, status="paused", detail=str(error))
         except Exception as error:
-            self._update(job, row, status="error", detail=str(error) if isinstance(error, SubtitleError)
-                         else "处理失败，请恢复连接后重试；已提交的任务会继续按原 ID 查询。")
+            if not self._retry_parse(job, row, error):
+                if isinstance(error, SubtitleError) and error.code == "tingwu_timeout":
+                    self._update(job, row, status="waiting_connection", detail="听悟请求超时，将继续查询原任务。",
+                                 next_retry_at=time.time() + max(.01, self.interval))
+                else:
+                    self._update(job, row, status="error", detail=str(error) if isinstance(error, SubtitleError)
+                                 else "处理失败，请恢复连接后重试；已提交的任务会继续按原 ID 查询。")
 
     @contextmanager
     def _export_slot(self, job, row):

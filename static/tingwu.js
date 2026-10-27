@@ -9,7 +9,7 @@
     const stage = {queued: "等待解析", resolving: "解析 CDN", remote_parsing: "听悟解析文件",
         submitting: "提交听悟", transcribing: "转写中", exporting: "导出 DOCX",
         converting: "下载并转 TXT", awaiting_confirmation: "等待听悟确认", waiting_connection: "等待重连",
-        paused: "已暂停", done: "已完成", error: "失败"};
+        retry_wait: "等待重试解析", paused: "已暂停", done: "已完成", error: "失败"};
     async function api(path, payload) {
         const response = await fetch(path, {method: payload ? "POST" : "GET",
             headers: payload ? {"Content-Type": "application/json"} : {},
