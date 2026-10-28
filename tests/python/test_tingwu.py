@@ -154,6 +154,76 @@ class TingwuTests(unittest.TestCase):
         self.assertEqual(sum(method == "submit" for method, _ in self.bridge.calls), 1)
         self.assertEqual(sum(method == "parse" for method, _ in self.bridge.calls), 1)
 
+    def test_record_lookup_reads_second_page_and_rejects_legacy_truncation(self):
+        first = [{"taskId": f"old-{i}", "transId": f"trans-{i}"} for i in range(100)]
+        target = {"taskId": "net-target", "transId": "target", "tag": {"showName": "课程"}, "fileSize": 100}
+        pages = []
+        def call(method, params):
+            self.assertEqual(params["title"], "")  # 全文检索可能漏掉同名记录，必须读取完整列表。
+            pages.append(params["pageNo"])
+            return {"data": first if params["pageNo"] == 1 else [target], "total": 101}
+        self.bridge.call = call
+        found = self.service._find_records("课程")
+        self.assertEqual(pages, [1, 2])
+        self.assertEqual(self.service._remote_candidates(
+            {"title": "课程", "remote_file": {"size": 100}}, found), [target])
+        self.bridge.version = 2
+        with self.assertRaisesRegex(BridgeUnavailable, "新版连接书签"):
+            self.service._find_records("课程")
+
+    def test_missing_remote_size_requires_matching_submission_time(self):
+        row = {"title": "课程", "submitted_at": 1700000000, "remote_file": {"size": 100},
+               "baseline_ids": ["old"]}
+        matching = {"taskId": "net-new", "transId": "new", "showTime": 1700000001000,
+                    "status": 2, "tag": {"showName": "课程"}}
+        old = {**matching, "transId": "old"}
+        unrelated = {**matching, "transId": "other", "showTime": 1700000500000}
+        no_time = {key: value for key, value in matching.items() if key != "showTime"}
+        self.assertEqual(self.service._remote_candidates(row, [matching, old, unrelated, no_time]), [matching])
+        self.assertEqual(self.service._remote_candidates(row, [{**matching, "fileSize": 101}]), [])
+
+    def test_retry_selected_failure_preserves_done_active_and_original_submission(self):
+        job = {"id": "selected-retry", "status": "partial", "created": time.time(), "rows": [
+            {"id": "done", "status": "done", "files": ["keep"]},
+            {"id": "other", "status": "error", "detail": "keep-other"},
+            {"id": "active", "status": "transcribing", "trans_id": "keep-active"},
+            {"id": "retry", "status": "paused", "submit_sent": True, "file_id": "original-file",
+             "submitted_at": 123, "detail": "old"}]}
+        self.service.jobs[job["id"]] = job
+        with patch.object(self.service, "_launch") as launch:
+            result = self.service.control({"job_id": job["id"], "action": "retry_failed", "row_ids": ["retry"]})
+        self.assertEqual([row["status"] for row in result["rows"]], ["done", "error", "transcribing", "queued"])
+        self.assertEqual(result["rows"][0]["files"], ["keep"])
+        self.assertEqual(result["rows"][3]["file_id"], "original-file")
+        self.assertEqual(result["rows"][3]["submitted_at"], 123)
+        self.assertTrue(result["rows"][3]["submit_sent"])
+        launch.assert_called_once_with(job, "", reset=False)
+        with self.assertRaises(SubtitleError):
+            self.service.control({"job_id": job["id"], "action": "retry_failed", "row_ids": ["done"]})
+
+    def test_retry_known_remote_failure_archives_attempt_but_not_export_failure(self):
+        job = {"id": "remote-retry", "status": "partial", "created": time.time(), "rows": [
+            {"id": "failed", "status": "error", "error_code": "remote_transcription", "remote_status": 2,
+             "submit_sent": True, "trans_id": "failed-record", "file_id": "failed-file"},
+            {"id": "export", "status": "error", "submit_sent": True, "trans_id": "keep-record",
+             "transcribed": True, "export_id": "keep-export"}]}
+        self.service.jobs[job["id"]] = job
+        with patch.object(self.service, "_launch"):
+            result = self.service.control({"job_id": job["id"], "action": "retry_failed"})
+        failed, exported = result["rows"]
+        self.assertNotIn("submit_sent", failed)
+        self.assertEqual(failed["previous_submissions"][0]["trans_id"], "failed-record")
+        self.assertEqual(exported["trans_id"], "keep-record")
+        self.assertTrue(exported["transcribed"])
+        self.assertEqual(exported["export_id"], "keep-export")
+
+    def test_record_without_trans_id_can_be_matched_by_new_task_id(self):
+        row = {"title": "课程", "remote_file": {"size": 100}, "baseline_ids": [None],
+               "baseline_task_ids": ["old"]}
+        old = {"taskId": "old", "tag": {"showName": "课程"}, "fileSize": 100}
+        failed = {"taskId": "failed", "tag": {"showName": "课程"}, "fileSize": 100}
+        self.assertEqual(self.service._remote_candidates(row, [old, failed]), [failed])
+
     def test_more_than_ten_empty_status_responses_auto_recover_without_resubmission(self):
         original = self.bridge.call
         queries = 0

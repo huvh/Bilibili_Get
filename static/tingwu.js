@@ -31,6 +31,15 @@
     function downloadLink(text, url) {
         const link = element("a", text, "secondary"); link.href = url; link.download = ""; return link;
     }
+    async function retryFailed(job, rowIds) {
+        try {
+            await window.BiliCookieExtension?.fillIfEmpty($("#tw-cookie"));
+            const cookie = $("#tw-cookie").value.trim(); $("#tw-cookie").value = "";
+            await api("/api/tingwu/control", {job_id: job.id, action: "retry_failed", row_ids: rowIds, cookie});
+            message("失败或中断项已加入重试队列；已完成项保留，已提交项先查询原听悟记录。");
+        } catch (error) { message(error.message, true); }
+        await refresh();
+    }
     function render(jobs) {
         const open = new Set([...$("#tw-jobs").querySelectorAll("details[open]")].map(node => node.dataset.job));
         const firstRender = !$("#tw-jobs").children.length;
@@ -43,7 +52,18 @@
             box.append(element("summary", `${job.local_import ? "DOCX 转 TXT" : "听悟批量转写"} · ${new Date(job.created * 1000).toLocaleString()} · ${done}/${job.rows.length} 完成${errors ? ` · ${errors} 失败` : ""}${waiting ? ` · ${waiting} 等待确认` : ""}${job.status === "waiting_connection" ? " · 等待听悟重连，连接后自动继续" : ""}`));
             const actions = element("div", undefined, "tw-actions");
             if (done) for (const [kind, label] of [["txt", "打包下载 TXT"], ["docx", "打包下载 DOCX"]])
-                actions.append(downloadLink(label, `/api/tingwu/bundle?job=${job.id}&kind=${kind}`));
+                actions.append(window.BundleDownload.createButton(label, `/api/tingwu/bundle?job=${job.id}&kind=${kind}`));
+            const failed = job.rows.filter(row => ["error", "paused"].includes(row.status));
+            if (!job.local_import && failed.length) {
+                const retry = element("button", `重试失败/中断项（${failed.length}）`, "secondary");
+                retry.disabled = job.status === "pausing";
+                retry.onclick = async () => {
+                    retry.disabled = true;
+                    try { await retryFailed(job, failed.map(row => row.id)); }
+                    finally { retry.disabled = job.status === "pausing"; }
+                };
+                actions.append(retry);
+            }
             if (!job.local_import && job.status !== "done") {
                 const running = ["running", "pausing", "waiting_connection"].includes(job.status);
                 const button = element("button", running ? "暂停本地跟踪" : "继续跟踪 / 重试导出", "secondary");
@@ -83,6 +103,16 @@
                     url.setAttribute("aria-label", row.title + " CDN 直链"); details.append(url); item.append(details);
                 }
                 const files = element("div", undefined, "tw-actions");
+                if (["error", "paused"].includes(row.status)) {
+                    const retry = element("button", "重试此项", "secondary");
+                    retry.disabled = job.status === "pausing";
+                    retry.onclick = async () => {
+                        retry.disabled = true;
+                        try { await retryFailed(job, [row.id]); }
+                        finally { retry.disabled = job.status === "pausing"; }
+                    };
+                    files.append(retry);
+                }
                 for (const file of row.files || []) files.append(downloadLink(file.kind.toUpperCase() + " · " + file.name, file.url));
                 item.append(files); box.append(item);
             }

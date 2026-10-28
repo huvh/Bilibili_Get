@@ -41,7 +41,7 @@
                 const files = job.rows.flatMap(row => row.files || []).filter(file => file.kind === "txt");
                 box.append(element("summary", `${new Date(job.created * 1000).toLocaleString()} · ${files.length} 份 TXT`));
                 const actions = element("div", undefined, "tw-actions");
-                actions.append(download("打包下载全部 TXT", `/api/tingwu/bundle?job=${job.id}&kind=txt`));
+                actions.append(window.BundleDownload.createButton("打包下载全部 TXT", `/api/tingwu/bundle?job=${job.id}&kind=txt`));
                 box.append(actions);
                 for (const row of job.rows) {
                     const item = element("article", undefined, "docx-result-row");

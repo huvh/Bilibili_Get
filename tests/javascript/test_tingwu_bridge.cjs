@@ -35,5 +35,11 @@ const vm = require('node:vm');
     await receive({origin, source: popup, data: {type: 'tingwu-bind', key: 'b'.repeat(48)}});
     assert.equal(replies.at(-1).value.key, 'b'.repeat(48));
     assert.equal(replies.at(-1).value.type, 'tingwu-ready');
+    assert.equal(replies.at(-1).value.version, 3);
+    await receive({origin, source: popup, data: {type: 'tingwu-request', key: 'b'.repeat(48),
+        id: '5'.repeat(32), method: 'find', params: {title: '课程', pageNo: 2}}});
+    const pageQuery = JSON.parse(requests.at(-1).options.body);
+    assert.equal(pageQuery.pageNo, 2);
+    assert.equal(pageQuery.pageSize, 100);
     console.log('PASS: origin/window checks, duplicate submit prevention, DOCX export contract, account data minimization, session rebinding');
 })().catch(error => {console.error(error); process.exitCode = 1;});

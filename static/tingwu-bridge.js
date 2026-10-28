@@ -22,7 +22,7 @@ function tingwuConnect(origin, key) {
         case "status": body = {action: "getTransStatus", version: "1.0", userId: "", taskIds: params.taskIds,
             transIds: params.transIds, preview: 1}; break;
         case "find": body = {action: "getTransList", version: "1.0", userId: "", preview: 1,
-            pageNo: 1, pageSize: 1000, orderDesc: true,
+            pageNo: Number.isInteger(params.pageNo) ? params.pageNo : 1, pageSize: 100, orderDesc: true,
             filter: {status: [0, 1, 2, 3, 4, 11], fileTypes: ["net_source"], showName: params.title,
                 beginTime: "", endTime: "", mediaType: "", read: "", lang: "", client: "", shareUserId: ""}}; break;
         case "export": body = {action: "exportTrans", transIds: params.transIds, userId: "",
@@ -48,10 +48,10 @@ function tingwuConnect(origin, key) {
         const data = event.data;
         // 本地服务重启后只更新当前配对窗口的临时密钥，已安装的书签仍可使用。
         if (data?.type === "tingwu-bind" && /^[a-f0-9]{48}$/.test(data.key)) {
-            key = data.key; popup.postMessage({type: "tingwu-ready", key, version: 2}, origin); return;
+            key = data.key; popup.postMessage({type: "tingwu-ready", key, version: 3}, origin); return;
         }
         if (data?.key !== key) return;
-        if (data.type === "tingwu-ping") { popup.postMessage({type: "tingwu-ready", key, version: 2}, origin); return; }
+        if (data.type === "tingwu-ping") { popup.postMessage({type: "tingwu-ready", key, version: 3}, origin); return; }
         if (data.type !== "tingwu-request" || !endpoints[data.method] || !/^[a-f0-9]{32}$/.test(data.id)) return;
         // 重发同一 ID 时复用 Promise，防止网络重连导致重复提交。
         if (!calls.has(data.id)) calls.set(data.id, request(data.method, data.params || {}).then(

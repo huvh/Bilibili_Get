@@ -7,7 +7,7 @@ import sys
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOT_FILES = ("README.md", ".gitignore", ".gitattributes", "bilibili.py", "cookie_extension.py",
+ROOT_FILES = ("README.md", ".gitignore", ".gitattributes", "bilibili.py", "bundle_download.py", "cookie_extension.py",
               "docx_to_txt.py", "navigation.py", "server.py", "subtitles.py", "tingwu.py",
               "video.py", "open_workbench.py", "requirements-video.txt", "start.cmd", "打开独立字幕助手.cmd",
               "听悟DOCX转TXT.cmd")

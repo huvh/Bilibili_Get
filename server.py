@@ -17,6 +17,7 @@ from video import VideoService
 from navigation import NAV_STYLE, render_navigation
 from tingwu import TingwuService
 from cookie_extension import extension_info, extension_package
+from bundle_download import BundleDownloads
 
 ROOT = Path(__file__).parent
 STATIC = ROOT / "static"
@@ -108,6 +109,7 @@ class SubtitleService:
 SERVICE = SubtitleService()
 VIDEOS = VideoService()
 TINGWU = TingwuService()
+BUNDLES = BundleDownloads(TINGWU.bundle)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -134,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(json.dumps(data, ensure_ascii=False, allow_nan=False).encode(),
                         "application/json; charset=utf-8", status)
 
-    def send_document(self, source, mime, filename):
+    def send_document(self, source, mime, filename, on_start=None):
         """分块发送 DOCX、TXT 和 ZIP，避免大文件整体载入内存。"""
         source.seek(0, 2)
         length = source.tell()
@@ -147,6 +149,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", "attachment; filename=document" + Path(filename).suffix
                          + "; filename*=UTF-8''" + urllib.parse.quote(filename))
         self.end_headers()
+        self.wfile.flush()
+        if on_start:
+            on_start()
         while True:
             chunk = source.read(256 * 1024)
             if not chunk:
@@ -224,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             if parsed.path == "/api/health":
                 return self.send_json({"ok": True, "service": "local-bilibili-subtitle", "tingwu": True,
-                                       "tingwu_recovery": 3})
+                                       "tingwu_recovery": 4})
             if parsed.path == "/api/cookie-extension/info":
                 return self.send_json(extension_info())
             if parsed.path == "/api/cookie-extension/download":
@@ -234,6 +239,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"key": TINGWU.bridge.key})
             if parsed.path == "/api/tingwu/status":
                 return self.send_json(TINGWU.snapshot(query.get("job", [None])[0]))
+            if parsed.path == "/api/tingwu/bundle/status":
+                return self.send_json(BUNDLES.status(query.get("id", [""])[0]))
+            if parsed.path == "/api/tingwu/bundle/download":
+                key = query.get("id", [""])[0]
+                with BUNDLES.open(key) as (source, name):
+                    return self.send_document(source, "application/zip", name,
+                                              on_start=lambda: BUNDLES.started(key))
             if parsed.path == "/api/tingwu/file":
                 path = TINGWU.file(query.get("path", [""])[0])
                 mime = "text/plain; charset=utf-8" if path.suffix == ".txt" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -270,6 +282,7 @@ class Handler(BaseHTTPRequestHandler):
                      "/docx": ("docx.html", "text/html; charset=utf-8"),
                      "/transcribe": ("transcribe.html", "text/html; charset=utf-8"),
                      "/tingwu-pages.js": ("tingwu-pages.js", "text/javascript; charset=utf-8"),
+                     "/bundle-download.js": ("bundle-download.js", "text/javascript; charset=utf-8"),
                      "/docx.js": ("docx.js", "application/javascript; charset=utf-8"),
                      "/helper": ("helper.html", "text/html; charset=utf-8"),
                      "/app.js": ("app.js", "application/javascript; charset=utf-8"),
@@ -331,6 +344,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = TINGWU.create(payload)
             elif path == "/api/tingwu/control":
                 result = TINGWU.control(payload)
+            elif path == "/api/tingwu/bundle/start":
+                result = BUNDLES.create(payload.get("job_id", ""), payload.get("kind", "txt"))
             elif path == "/api/tingwu/import":
                 result = TINGWU.import_document(payload)
             elif path == "/api/tingwu/bridge/poll":
