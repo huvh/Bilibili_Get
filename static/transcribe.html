@@ -34,7 +34,8 @@
                 <div class="tw-page-status"><p id="tw-page-summary" class="field-hint" role="status" aria-live="polite">粘贴链接后自动识别多 P 视频，弹窗勾选需要转写的分 P。</p><button id="tw-page-edit" type="button" class="secondary" hidden>选择分 P</button></div>
                 <p class="field-hint">已有听悟记录可直接粘贴记录链接，只跟踪并导出，不会重复转写。</p>
                 <details><summary>B 站登录选项</summary><label for="tw-cookie">B 站 Cookie（可选，仅当前批次解析时使用）</label><input id="tw-cookie" type="password" autocomplete="off" placeholder="匿名可解析的视频不需要填写"><p class="field-hint">不写入磁盘；暂停后需要重新解析受限视频时，可直接使用已取得的 CDN 直链。</p></details>
-                <button id="tw-start" class="primary" type="submit" disabled>开始批量转写 →</button>
+                <p id="tw-start-hint" class="field-hint" role="status" aria-live="polite">尚未连接听悟。请先在已登录的听悟网页点击“连接听悟工作台”书签，再开始转写。</p>
+                <button id="tw-start" class="primary" type="submit" aria-describedby="tw-start-hint">开始批量转写 →</button>
             </form>
             <div id="tw-message" class="video-message" role="status" aria-live="polite" hidden></div>
             <p id="tw-empty" class="tw-empty">还没有批次。连接听悟后即可开始批量转写。</p>

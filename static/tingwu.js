@@ -6,6 +6,7 @@
     let connected = false, submitting = false, refreshing = false, serviceFailed = false, lastSnapshot = "";
     let peerKey = new URLSearchParams(location.hash.slice(1)).get("tingwu") || "", peerSeen = 0, peerVersion = 0;
     const sent = new Set();
+    const connectionRequired = "尚未连接听悟，转写尚未启动。请先在已登录的听悟网页点击“连接听悟工作台”书签，并保持听悟页和打开的工作台都不关闭。";
     const stage = {queued: "等待解析", resolving: "解析 CDN", remote_parsing: "听悟解析文件",
         submitting: "提交听悟", transcribing: "转写中", exporting: "导出 DOCX",
         converting: "下载并转 TXT", awaiting_confirmation: "等待听悟确认", waiting_connection: "等待重连",
@@ -21,6 +22,11 @@
     function message(text, error = false) {
         $("#tw-message").textContent = text; $("#tw-message").hidden = !text;
         $("#tw-message").classList.toggle("error", error);
+    }
+    function showConnectionRequired() {
+        message(connectionRequired, true);
+        $("#tw-connect-help").open = true;
+        $("#tw-start-hint").hidden = false;
     }
     function element(tag, text, className) {
         const node = document.createElement(tag);
@@ -129,7 +135,10 @@
             $("#tw-connection").textContent = data.bridge_update ? "连接书签需要更新" :
                 (connected ? "● 听悟网页已连接" : "○ 尚未连接听悟");
             $("#tw-connection").classList.toggle("online", connected);
-            $("#tw-start").disabled = submitting || !connected;
+            // 未连接时仍允许点击，让用户立即看到原因；只在提交过程中禁用，防止重复操作。
+            $("#tw-start").disabled = submitting;
+            $("#tw-start-hint").hidden = connected;
+            if (connected && $("#tw-message").textContent === connectionRequired) message("");
             const snapshot = JSON.stringify([connected, data.jobs.filter(job => !job.local_import)]);
             if (snapshot !== lastSnapshot) {render(data.jobs.filter(job => !job.local_import)); lastSnapshot = snapshot;}
         } catch (error) { serviceFailed = true; message("本地服务连接中断：" + error.message, true); }
@@ -167,10 +176,18 @@
         event.preventDefault();
         message("将“连接听悟工作台”拖到浏览器书签栏，然后在已登录的听悟网页点击这个书签。连接后会打开批量转写页面。");
     };
+    $("#tw-start").onclick = event => {
+        // 点击拦截放在表单校验之前，即使还没输入链接也能解释未连接的原因。
+        if (!connected) {event.preventDefault(); showConnectionRequired();}
+    };
     $("#tw-form").onsubmit = async event => {
         event.preventDefault(); if (submitting) return;
+        if (!connected) {showConnectionRequired(); return;}
         submitting = true; $("#tw-start").disabled = true;
         try {
+            // 连接状态可能在上一次定时刷新后改变，开始解析前再次核对。
+            const status = await api("/api/tingwu/status"); connected = status.connected;
+            if (!connected) {showConnectionRequired(); return;}
             const urls = await window.TingwuPages.prepare();
             if (!urls) return;
             await window.BiliCookieExtension?.fillIfEmpty($("#tw-cookie"));
@@ -178,7 +195,7 @@
             await api("/api/tingwu/start", {urls, cookie, all_pages: false});
             message("批次已启动。请保持听悟页和连接助手打开，任务与结果会保存在本机。");
         } catch (error) { message(error.message, true); }
-        finally { submitting = false; await refresh(); }
+        finally { submitting = false; $("#tw-start").disabled = false; await refresh(); }
     };
     (async () => {
         try {
